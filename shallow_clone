@@ -1,0 +1,11 @@
+if [ -z "$3" ]; then
+  echo "Usage: $0 <GIT_URL> <GIT_COMMIT> <PATH>"
+  exit 1
+fi
+
+mkdir -p $3
+cd $3
+git init
+git remote add origin $1
+git fetch --progress --depth 1 origin $2
+git checkout FETCH_HEAD
