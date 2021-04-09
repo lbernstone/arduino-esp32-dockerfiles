@@ -1,0 +1,54 @@
+FROM ubuntu:18.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    apt-utils \
+    bison \
+    ca-certificates \
+    ccache \
+    check \
+    curl \
+    flex \
+    git \
+    gperf \
+    lcov \
+    libncurses-dev \
+    libusb-1.0-0-dev \
+    make \
+    ninja-build \
+    python3 \
+    python3-pip \
+    unzip \
+    wget \
+    xz-utils \
+    zip \
+   && apt-get autoremove -y \
+   && rm -rf /var/lib/apt/lists/* \
+   && update-alternatives --install /usr/bin/python python /usr/bin/python3 10
+
+RUN python -m pip install --upgrade pip virtualenv
+COPY shallow_clone /usr/bin/ 
+
+ENV IDF_TOOLS_PATH=/opt/esp
+ENV IDF_PATH=/opt/esp/idf
+ENV LIB_BUILDER_PATH=/opt/esp/lib-builder
+
+RUN shallow_clone https://github.com/espressif/esp-idf 4e27cbb89f89dcdd32c99074854058f03b2c25d4 $IDF_PATH \
+    && cd $IDF_PATH && git submodule update --progress --depth 1 --init --recursive \
+    && rm $IDF_PATH/components/expat/expat/testdata/largefiles/* \
+    && python -m pip install -r $IDF_PATH/requirements.txt
+
+RUN curl https://dl.espressif.com/dl/xtensa-esp32-elf-linux64-1.22.0-80-g6c4433a-5.2.0.tar.gz | tar -xzC $IDF_TOOLS_PATH
+
+RUN shallow_clone https://github.com/espressif/esp32-arduino-lib-builder dca3e75157bc87c74430c6228adb3120dd0f5d8e $LIB_BUILDER_PATH
+RUN sed -i '40s!^!source tools/config.sh\n\n!; 41,46{s/^/#/}' $LIB_BUILDER_PATH/build.sh
+
+RUN shallow_clone https://github.com/espressif/arduino-esp32 1.0.4 $LIB_BUILDER_PATH/components/arduino \
+      && rm -rf $LIB_BUILDER_PATH/components/arduino/tools/sdk
+RUN shallow_clone https://github.com/espressif/esp32-camera/ 8a365ee27240756cdd5a5e009db41ddd983b1e0e $LIB_BUILDER_PATH/components/esp32-camera
+RUN shallow_clone https://github.com/espressif/esp-face/ 0e119fea44b042e0f10c1e2003b9ae662efa1bfa $LIB_BUILDER_PATH/components/esp-face
+
+RUN echo "PATH=$IDF_TOOLS_PATH/xtensa-esp32-elf/bin:$PATH\ncd $LIB_BUILDER_PATH" >> /root/.bashrc
+
+CMD [ "/bin/bash" ]

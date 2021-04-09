@@ -1,0 +1,39 @@
+FROM ubuntu:18.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    apt-utils bison ca-certificates ccache check cmake curl \
+    flex git gperf lcov libncurses-dev libusb-1.0-0-dev \
+    locales make nano ninja-build python3 python3-pip \
+    unzip vim wget xz-utils zip \
+   && apt-get autoremove -y \
+   && rm -rf /var/lib/apt/lists/* \
+   && update-alternatives --install /usr/bin/python python /usr/bin/python3 10
+
+RUN python -m pip install --no-cache-dir --upgrade pip virtualenv
+COPY shallow_clone /usr/bin/ 
+
+ENV IDF_TOOLS_PATH=/opt/esp
+ENV IDF_PATH=/opt/esp/idf
+ENV LIB_BUILDER_PATH=/opt/esp/lib-builder
+RUN mkdir -p $LIB_BUILDER_PATH
+
+#ADD dist/xtensa-esp32-elf-linux64-1.22.0-97-gc752ad5-5.2.0.tar.gz $IDF_TOOLS_PATH
+RUN curl https://dl.espressif.com/dl/xtensa-esp32-elf-linux64-1.22.0-97-gc752ad5-5.2.0.tar.gz | tar -xzC $IDF_TOOLS_PATH
+
+RUN shallow_clone https://github.com/espressif/esp-idf 7a85334d80f90b1d60b5861452db691240546037 $IDF_PATH \
+    && cd $IDF_PATH && git submodule update --progress --depth 1 --init --recursive \
+    && rm $IDF_PATH/components/expat/expat/testdata/largefiles/* \
+    && python -m pip install --no-cache-dir -r $IDF_PATH/requirements.txt
+
+RUN shallow_clone https://github.com/espressif/esp32-arduino-lib-builder 3fa59d5715d09ff1a499ae8ba3abc65a5d6a4d8e $LIB_BUILDER_PATH
+RUN sed -i '40s!^!source tools/config.sh\n\n!; 41,46{s/^/#/}' $LIB_BUILDER_PATH/build.sh
+
+RUN shallow_clone https://github.com/espressif/arduino-esp32 419ba32432a34b3299edb61b942a9f3edc801f57 $LIB_BUILDER_PATH/components/arduino \
+      && rm -rf $LIB_BUILDER_PATH/components/arduino/tools/sdk
+RUN shallow_clone https://github.com/espressif/esp32-camera/ a5ccbecf08f98eb84c7443d8aebe4a529ba737a7 $LIB_BUILDER_PATH/components/esp32-camera
+RUN shallow_clone https://github.com/espressif/esp-face/ 420fc7e219ba98e40a5493b9d4be270db2f2d724 $LIB_BUILDER_PATH/components/esp-face
+
+RUN echo "PATH=$IDF_TOOLS_PATH/xtensa-esp32-elf/bin:$PATH\ncd $LIB_BUILDER_PATH" >> /root/.bashrc
+
