@@ -1,0 +1,80 @@
+FROM ubuntu:18.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    apt-utils bison ca-certificates ccache check cmake curl \
+    flex git gperf lcov libncurses-dev libusb-1.0-0-dev \
+    locales make nano ninja-build python3 python3-pip \
+    unzip vim wget xz-utils zip \
+   && apt-get autoremove -y \
+   && rm -rf /var/lib/apt/lists/* \
+   && update-alternatives --install /usr/bin/python python /usr/bin/python3 10
+
+RUN locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+RUN python -m pip install --no-cache-dir --upgrade pip virtualenv
+
+COPY shallow_clone /usr/bin/ 
+ENV IDF_PATH=/opt/esp/idf
+ENV LIB_BUILDER_PATH=/opt/esp/lib-builder
+ENV NO_GIT=1
+
+RUN mkdir -p /opt/esp/tools
+ADD dist/xtensa-esp32-elf-gcc8_4_0-esp-2020r3-linux-amd64.tar.gz /opt/esp/tools/
+ADD dist/xtensa-esp32s2-elf-gcc8_4_0-esp-2020r3-linux-amd64.tar.gz /opt/esp/tools/
+ADD dist/riscv32-esp_1.24.0-123-g64eb9ff-linux-repack.tar.gz /opt/esp/tools/
+ADD dist/binutils-esp32s2ulp-linux-amd64-2.28.51-esp-20191205.tar.gz /opt/esp/tools/
+ADD dist/binutils-esp32ulp-linux-amd64-2.28.51-esp-20191205.tar.gz /opt/esp/tools/
+ADD dist/openocd-esp32-linux64-0.10.0-esp32-20200709.tar.gz /opt/esp/tools/
+
+RUN shallow_clone https://github.com/espressif/esp-idf cf457d412a7748139b77c94e7debe72ee86199af $IDF_PATH \
+    && cd $IDF_PATH && git submodule update --progress --depth 1 --init --recursive \
+    && rm $IDF_PATH/components/expat/expat/testdata/largefiles/* \
+    && rm -rf $IDF_PATH/components/tinyusb/tinyusb/examples \
+    && rm -rf $IDF_PATH/docs \
+    && if [ $NO_GIT ]; then \
+         rm -rf $IDF_PATH/.git && find $IDF_PATH -name .git -delete; fi
+
+
+RUN sed -i 's/"install.*/"install": "never",/' $IDF_PATH/tools/tools.json
+RUN sed -i "s/'--no-site-packages',//" $IDF_PATH/tools/idf_tools.py \
+    && $IDF_PATH/install.sh \
+    && rm -rf /root/.cache /root/.local \
+    && true
+
+RUN shallow_clone https://github.com/espressif/esp32-arduino-lib-builder d491d3a565f016d86aa474098a5abf2e88dd0df8 $LIB_BUILDER_PATH \
+    && if [ $NO_GIT ]; then find $LIB_BUILDER_PATH/.git -delete; fi
+
+RUN shallow_clone https://github.com/espressif/arduino-esp32 5d9b98c9b04e591044078ac2304da95e8c7e997b $LIB_BUILDER_PATH/components/arduino \
+    && rm -rf $LIB_BUILDER_PATH/components/arduino/tools/sdk \
+    && if [ $NO_GIT ]; then find $LIB_BUILDER_PATH/components/arduino/.git -delete; fi
+
+RUN shallow_clone https://github.com/espressif/esp32-camera/ 2dded7c578623ebeff5b5ff468275eabf2650ea2 $LIB_BUILDER_PATH/components/esp32-camera \
+    && if [ $NO_GIT ]; then find $LIB_BUILDER_PATH/components/esp32-camera/.git -delete; fi
+RUN shallow_clone https://github.com/joltwallet/esp_littlefs d268e18d774431fb6f0e444feef4e97a2dfaaa29 $LIB_BUILDER_PATH/components/esp_littlefs \
+    && git -C $LIB_BUILDER_PATH/components/esp_littlefs submodule update --progress --depth 1 --init --recursive \
+    && if [ $NO_GIT ]; then find $LIB_BUILDER_PATH/components/esp_littlefs/.git -delete; fi
+RUN shallow_clone https://github.com/espressif/esp-rainmaker ec23bd8aa6843966fd13e92940e41863779260d4 $LIB_BUILDER_PATH/components/esp-rainmaker \
+    && git -C $LIB_BUILDER_PATH/components/esp-rainmaker submodule update --progress --depth 1 --init --recursive \
+    && if [ $NO_GIT ]; then find $LIB_BUILDER_PATH/components/esp-rainmaker/.git -delete; fi
+RUN shallow_clone https://github.com/lbernstone/esp-dsp riscv $LIB_BUILDER_PATH/components/esp-dsp \
+    && git -C $LIB_BUILDER_PATH/components/esp-dsp submodule update --progress --depth 1 --init --recursive \
+    && if [ $NO_GIT ]; then find $LIB_BUILDER_PATH/components/esp-dsp/.git -delete; fi
+RUN shallow_clone https://github.com/espressif/esp-face/ 420fc7e219ba98e40a5493b9d4be270db2f2d724 $LIB_BUILDER_PATH/components/esp-face \
+    && if [ $NO_GIT ]; then find $LIB_BUILDER_PATH/components/esp-face/.git -delete; fi
+
+RUN echo "PATH=$PATH:/opt/esp/tools/xtensa-esp32-elf/bin:/opt/esp/tools/xtensa-esp32s2-elf/bin:/opt/esp/tools/riscv32-esp-elf/bin\n \
+          cd $LIB_BUILDER_PATH\n \
+          source $IDF_PATH/export.sh &> /dev/null" >> /root/.bashrc
+
+
+# All the little fixes
+RUN rm $LIB_BUILDER_PATH/components/esp32-camera/idf_component.yml
+RUN shallow_clone https://github.com/hathach/tinyusb 70c89da7ba550b398f83068ca342cfe23e9c720c $LIB_BUILDER_PATH/components/arduino_tinyusb/tinyusb \
+    && if [ $NO_GIT ]; then find $LIB_BUILDER_PATH/components/arduino_tinyusb/tinyusb/.git -delete; fi
+RUN sed -i '16,21s/^/#/;/version.txt/d' $LIB_BUILDER_PATH/build.sh
+RUN sed -i "1 i if(CONFIG_IDF_TARGET_ARCH_XTENSA)" $LIB_BUILDER_PATH/components/esp-face/CMakeLists.txt && echo "endif()" >> $LIB_BUILDER_PATH/components/esp-face/CMakeLists.txt
+RUN echo v2.0.0alpha1 > $LIB_BUILDER_PATH/version.txt
